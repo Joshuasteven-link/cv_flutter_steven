@@ -1,0 +1,20 @@
+name: cv_flutter_projet
+description: Mon application CV en Flutter.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - PXL 20250924 1757031 X 99.PORTRAIT-2.jpg
+    - PXL 20260213 0824189 X 42.PORTRAIT.jpg
+    - PXL 20260301 155423 X 274.PORTRAIT.jpg
+    
+    
