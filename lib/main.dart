@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const MonApplicationCV());
@@ -22,7 +24,103 @@ class MonApplicationCV extends StatelessWidget {
 }
 
 // ============================================================================
-// PAGE 1 : PAGE DE CONNEXION
+// MODÈLE DE DONNÉES : MEMBRE DE FAMILLE
+// ============================================================================
+class MembreFamille {
+  final int id;
+  final String nom;
+  final String postnom;
+  final String prenom;
+  final String lieuNaissance;
+  final String dateNaissance;
+  final String parente;
+  final String? imageUrl;
+
+  MembreFamille({
+    required this.id,
+    required this.nom,
+    required this.postnom,
+    required this.prenom,
+    required this.lieuNaissance,
+    required this.dateNaissance,
+    required this.parente,
+    this.imageUrl,
+  });
+
+  factory MembreFamille.fromJson(Map<String, dynamic> json) {
+    return MembreFamille(
+      id: int.parse(json['id'].toString()),
+      nom: json['nom'] ?? '',
+      postnom: json['postnom'] ?? '',
+      prenom: json['prenom'] ?? '',
+      lieuNaissance: json['lieu_naissance'] ?? '',
+      dateNaissance: json['date_naissance'] ?? '',
+      parente: json['parente'] ?? '',
+      imageUrl: json['image_url'],
+    );
+  }
+}
+
+// ============================================================================
+// SERVICE API (CONNEXION + CRUD FAMILLE)
+// ============================================================================
+class ApiService {
+  // ⚠️ REMPLACE CETTE ADRESSE PAR TON LIEN INFINITYFREE (ex: https://infinityfreeapp.com)
+  static const String baseUrl = 'https://infinityfreeapp.com';
+
+  static Future<Map<String, dynamic>> register(String email, String password) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/accounts/register'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'password': password}),
+    );
+    return jsonDecode(response.body);
+  }
+
+  static Future<Map<String, dynamic>> login(String email, String password) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/accounts/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'password': password}),
+    );
+    return jsonDecode(response.body);
+  }
+
+  static Future<List<MembreFamille>> getMembres() async {
+    final response = await http.get(Uri.parse('$baseUrl/famille-membres'));
+    final data = jsonDecode(response.body);
+    if (data['success'] == true) {
+      return (data['data'] as List).map((e) => MembreFamille.fromJson(e)).toList();
+    }
+    throw Exception(data['message'] ?? 'Erreur de chargement');
+  }
+
+  static Future<bool> ajouterMembre(Map<String, String> body) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/famille-membres'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    return jsonDecode(response.body)['success'] == true;
+  }
+
+  static Future<bool> modifierMembre(int id, Map<String, String> body) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/famille-membres/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    return jsonDecode(response.body)['success'] == true;
+  }
+
+  static Future<bool> supprimerMembre(int id) async {
+    final response = await http.delete(Uri.parse('$baseUrl/famille-membres/$id'));
+    return jsonDecode(response.body)['success'] == true;
+  }
+}
+
+// ============================================================================
+// PAGE 1 : PAGE DE CONNEXION & INSCRIPTION (AUTHENTIFICATION RÉELLE)
 // ============================================================================
 class PageConnexion extends StatefulWidget {
   const PageConnexion({super.key});
@@ -32,21 +130,63 @@ class PageConnexion extends StatefulWidget {
 }
 
 class _PageConnexionState extends State<PageConnexion> {
-  final TextEditingController _identifiantController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _motDePasseController = TextEditingController();
   String _messageErreur = '';
+  bool _modeConnexion = true;
+  bool _chargement = false;
+  bool _masquerMotDePasse = true;
 
-  void _seConnecter() {
-    if (_identifiantController.text.isNotEmpty &&
-        _motDePasseController.text.isNotEmpty) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const NavigationPrincipale()),
-      );
-    } else {
+  Future<void> _validerFormulaire() async {
+    final email = _emailController.text.trim();
+    final password = _motDePasseController.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => _messageErreur = 'Veuillez remplir tous les champs.');
+      return;
+    }
+
+    setState(() {
+      _chargement = true;
+      _messageErreur = '';
+    });
+
+    try {
+      final resultat = _modeConnexion
+          ? await ApiService.login(email, password)
+          : await ApiService.register(email, password);
+
+      if (!mounted) return;
+
+      if (resultat['success'] == true) {
+        if (_modeConnexion) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const NavigationPrincipale()),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Compte créé avec succès ! Connectez-vous.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          setState(() => _modeConnexion = true);
+        }
+      } else {
+        String msg = resultat['message'] ?? 'Identifiants incorrects.';
+        if (resultat['errors'] != null && resultat['errors'] is Map) {
+          msg = (resultat['errors'] as Map).values.join('\n');
+        }
+        setState(() => _messageErreur = msg);
+      }
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _messageErreur = 'Veuillez remplir tous les champs.';
+        _messageErreur = 'Erreur de connexion à l\'API : $e';
       });
+    } finally {
+      if (mounted) setState(() => _chargement = false);
     }
   }
 
@@ -60,29 +200,38 @@ class _PageConnexionState extends State<PageConnexion> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.lock_person, size: 80, color: Colors.indigo),
+                Icon(
+                  _modeConnexion ? Icons.lock_person : Icons.person_add,
+                  size: 80,
+                  color: Colors.indigo,
+                ),
                 const SizedBox(height: 20),
-                const Text(
-                  'Bienvenue',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                Text(
+                  _modeConnexion ? 'Bienvenue' : 'Créer un compte',
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 30),
                 TextField(
-                  controller: _identifiantController,
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
-                    labelText: 'Identifiant',
+                    labelText: 'Adresse Email',
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
+                    prefixIcon: Icon(Icons.email),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _motDePasseController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Mot de passe',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
+                  obscureText: _masquerMotDePasse,
+                  decoration: InputDecoration(
+                    labelText: 'Mot de passe (min. 6 caractères)',
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.lock),
+                    suffixIcon: IconButton(
+                      icon: Icon(_masquerMotDePasse ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setState(() => _masquerMotDePasse = !_masquerMotDePasse),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -90,21 +239,38 @@ class _PageConnexionState extends State<PageConnexion> {
                   Text(
                     _messageErreur,
                     style: const TextStyle(color: Colors.red),
+                    textAlign: TextAlign.center,
                   ),
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _seConnecter,
+                    onPressed: _chargement ? null : _validerFormulaire,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.indigo,
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text(
-                      'Se connecter',
-                      style: TextStyle(fontSize: 18),
-                    ),
+                    child: _chargement
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text(
+                            _modeConnexion ? 'Se connecter' : 'S\'inscrire',
+                            style: const TextStyle(fontSize: 18),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _modeConnexion = !_modeConnexion;
+                      _messageErreur = '';
+                    });
+                  },
+                  child: Text(
+                    _modeConnexion
+                        ? 'Pas de compte ? Créer un compte'
+                        : 'Déjà inscrit ? Se connecter',
                   ),
                 ),
               ],
@@ -120,189 +286,3 @@ class _PageConnexionState extends State<PageConnexion> {
 // NAVIGATION PRINCIPALE
 // ============================================================================
 class NavigationPrincipale extends StatefulWidget {
-  const NavigationPrincipale({super.key});
-
-  @override
-  State<NavigationPrincipale> createState() => _NavigationPrincipaleState();
-}
-
-class _NavigationPrincipaleState extends State<NavigationPrincipale> {
-  int _indexActuel = 0;
-
-  final List<Widget> _pages = const [
-    PageAccueilCV(),
-    PageFamille(),
-    PageContact(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_indexActuel],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _indexActuel,
-        selectedItemColor: Colors.indigo,
-        onTap: (index) {
-          setState(() {
-            _indexActuel = index;
-          });
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Mon CV'),
-          BottomNavigationBarItem(icon: Icon(Icons.family_restroom), label: 'Famille'),
-          BottomNavigationBarItem(icon: Icon(Icons.contact_mail), label: 'Contact'),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// PAGE 2 : PAGE D'ACCUEIL (CV COMPLET)
-// ============================================================================
-class PageAccueilCV extends StatelessWidget {
-  const PageAccueilCV({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mon CV')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Column(
-                children: [
-                  const CircleAvatar(
-                    radius: 55,
-                    backgroundImage: AssetImage('profil.jpg'),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Ton Nom Complet',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const Text(
-                    'Étudiant en Informatique & Développeur Mobile',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 32),
-
-            _construireTitreSection('Formation'),
-            const ListTile(
-              leading: Icon(Icons.school, color: Colors.indigo),
-              title: Text('Licence en Informatique'),
-              subtitle: Text('Université - 2024 à Présent'),
-            ),
-
-            _construireTitreSection('Expériences'),
-            const ListTile(
-              leading: Icon(Icons.work, color: Colors.indigo),
-              title: Text('Stage Développeur Mobile'),
-              subtitle: Text('Création d\'applications avec Flutter'),
-            ),
-            const ListTile(
-              leading: Icon(Icons.code, color: Colors.indigo),
-              title: Text('Projet Académique'),
-              subtitle: Text('Développement d\'une application de gestion'),
-            ),
-
-            _construireTitreSection('Compétences Techniques'),
-            Wrap(
-              spacing: 8.0,
-              children: const [
-                Chip(label: Text('Flutter & Dart')),
-                Chip(label: Text('Git & GitHub')),
-                Chip(label: Text('HTML / CSS')),
-                Chip(label: Text('Algorithmique')),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _construireTitreSection('Compétences Linguistiques'),
-            const Text('• Français : Courant\n• Anglais : Intermédiaire\n• Swahili : Courant'),
-            const SizedBox(height: 16),
-
-            _construireTitreSection('Centres d\'intérêt'),
-            const Text('• Programmation, Lecture, Sport, Musique'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _construireTitreSection(String titre) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0, top: 8.0),
-      child: Text(
-        titre,
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: Colors.indigo,
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// PAGE 3 : PAGE FAMILLE
-// ============================================================================
-class PageFamille extends StatelessWidget {
-  const PageFamille({super.key});
-
-  final List<Map<String, String>> membres = const [
-    {
-      'nom': 'Famille',
-      'lien': 'Famille',
-      'profession': 'Famille',
-      'photo': 'PXL 20260301 155423 X 274.PORTRAIT.jpg.jpg',
-    },
-    {
-      'nom': 'Cousinage',
-      'lien': 'Cousinage',
-      'profession': 'Cousonage',
-      'photo': 'PXL 20260213 0824189 X 42.PORTRAIT.jpg',
-    },
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ma Famille')),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(12.0),
-        itemCount: membres.length,
-        itemBuilder: (context, index) {
-          final membre = membres[index];
-          return Card(
-            elevation: 3,
-            margin: const EdgeInsets.symmetric(vertical: 8.0),
-            child: ListTile(
-              contentPadding: const EdgeInsets.all(12.0),
-              leading: CircleAvatar(
-                radius: 30,
-                backgroundImage: AssetImage(membre['photo']!),
-              ),
-              title: Text(
-                membre['nom']!,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              subtitle: Text(
-                'Lien : ${membre['lien']}\nProfession : ${membre['profession']}',
-              ),
-              isThreeLine: true,
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
