@@ -17,4 +17,9 @@ flutter:
     - PXL 20260213 0824189 X 42.PORTRAIT.jpg
     - PXL 20260301 155423 X 274.PORTRAIT.jpg
     
-    
+    dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  image_picker: ^1.0.7
+  
